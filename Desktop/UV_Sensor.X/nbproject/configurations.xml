@@ -27,7 +27,6 @@
       <itemPath>bluetooth.c</itemPath>
       <itemPath>interrupts.c</itemPath>
       <itemPath>I2C.c</itemPath>
-      <itemPath>UV.c</itemPath>
     </logicalFolder>
   </logicalFolder>
   <projectmakefile>Makefile</projectmakefile>
@@ -191,7 +190,7 @@
         <property key="memories.programmemory.ranges" value="0-1ffff"/>
         <property key="poweroptions.powerenable" value="true"/>
         <property key="programmerToGoFilePath"
-                  value="C:/Users/ArekKaniewski/Desktop/UV_Sensor.X/debug/default/UV_Sensor_ptg"/>
+                  value="C:/Users/ArekKaniewski/MPLABXProjects/UV_Sensor.X/debug/default/UV_Sensor_ptg"/>
         <property key="programmerToGoImageName" value="UV_Sensor_ptg"/>
         <property key="programoptions.donoteraseauxmem" value="false"/>
         <property key="programoptions.eraseb4program" value="true"/>

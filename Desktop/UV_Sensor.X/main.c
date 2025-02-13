@@ -180,65 +180,102 @@ void Initialise(void)
     InitialiseSerial(115200);
 	Interrupts_Init();
 	InitialiseBTSerial(115200);
-	
+    
 	// Initialize Bluetooth and configure beacon
     BT_Init();
     BT_ConfigureBeacon();
+    
+    UVSensor_Init();
 }
+
+// Structure to hold UV measurements
+typedef struct {
+    uint16_t raw_UVA;    // MRES1
+    uint16_t raw_UVB;    // MRES2
+    uint16_t raw_UVC;    // MRES3
+    float UVA_nW;        // Converted UVA value
+    float UVB_nW;        // Converted UVB value
+    float UVC_nW;        // Converted UVC value
+} UV_Measurements_t;
+
+// Function prototype
+static int16_t ReadAndCalculateTemperature(void); 
+static UV_Measurements_t ReadAndCalculateUV(void);
+static float CalculateUVI(const UV_Measurements_t* uv_data);
+
 
 uint8_t counter = 0;
 
 void main(void) {
     Initialise();
-    UVSensor_Init();
     
     while (1) {
         AS7331_write_reg(0x00, 0x80);  // Set OSR_SEL=1 without RESET
         CLRWDT();
 
-        // Read OSR+STATUS correctly
         uint16_t OSR_STAT = AS7331_read_measurement(0);
         printf("OSR+STATUS: 0x%04X\n", OSR_STAT);
 
-        // Read sensor values
-        uint16_t raw_temp = AS7331_read_measurement(1);
-        uint16_t MRES1 = AS7331_read_measurement(2);  // UVA (reg 0x03-0x04)
-        uint16_t MRES2 = AS7331_read_measurement(3);  // UVB (reg 0x05-0x06)
-        uint16_t MRES3 = AS7331_read_measurement(4);  // UVC (reg 0x07-0x08)
-
-        printf("Raw TEMP Register: 0x%04X (%d)\n", raw_temp, raw_temp);
-
-        // Extract only 12-bit value (remove unwanted bits)
-        raw_temp &= 0x0FFF;
-
-        // Sign extend if negative (12-bit to 16-bit signed integer)
-        if (raw_temp & 0x0800) {  
-            raw_temp |= 0xF000;  // Convert 12-bit signed to 16-bit signed
-        }
-
-        // Apply correct formula
-        float temperature = (raw_temp * 0.05f) - 66.9f;
-        printf("TEMP: %.2f degC (Raw: 0x%04X, Dec: %d)\n", temperature, raw_temp, raw_temp);
-
-        float UVA_nW = MRES1 * 0.16f;
-        float UVB_nW = MRES2 * 0.18f;
-		float UVC_nW = MRES3 * 0.08f;
-        printf("MRES1 (UVA): %u, %.2f nW/cm^2\n", MRES1, UVA_nW);
-        printf("MRES2 (UVB): %u, %.2f nW/cm^2\n", MRES2, UVB_nW);
-        printf("MRES3 (UVC): %u, %.2f nW/cm^2\n", MRES3, UVC_nW);
+        int16_t temperature = ReadAndCalculateTemperature();
+        
+        // UV measurements now handled in separate function
+        UV_Measurements_t uv_data = ReadAndCalculateUV();
         
         // Calculate UVI using the formula from the image
-        float UVI = 0.04f * ((UVB_nW * 0.456f) + (UVA_nW * 0.0015f));
+        float UVI = 0.04f * ((uv_data.UVB_nW * 0.456f) + (uv_data.UVA_nW * 0.0015f));
         printf("Calculated UVI: %.2f\n", UVI);
-		CLRWDT();
-		// Update beacon data with new UVI reading
-		UpdateBeaconData(UVI);
+        
+        CLRWDT();
+        UpdateBeaconData(UVI);
 
         counter++;
         if (counter > 3) {
             EN_BATTERIES = 0;
         }   
         
-        __delay_ms(1000);
+        __delay_ms(100);
     }
+}
+
+static UV_Measurements_t ReadAndCalculateUV(void) {
+    UV_Measurements_t result = {0};  // Initialize all members to 0
+    
+    // Read raw values
+    result.raw_UVA = AS7331_read_measurement(2);  // UVA (reg 0x03-0x04)
+    result.raw_UVB = AS7331_read_measurement(3);  // UVB (reg 0x05-0x06)
+    result.raw_UVC = AS7331_read_measurement(4);  // UVC (reg 0x07-0x08)
+    
+    // Calculate converted values
+    result.UVA_nW = result.raw_UVA * 0.16f;
+    result.UVB_nW = result.raw_UVB * 0.18f;
+    result.UVC_nW = result.raw_UVC * 0.08f;
+    
+    // Print debug information
+    printf("MRES1 (UVA): %u, %.2f nW/cm^2\n", result.raw_UVA, result.UVA_nW);
+    printf("MRES2 (UVB): %u, %.2f nW/cm^2\n", result.raw_UVB, result.UVB_nW);
+    printf("MRES3 (UVC): %u, %.2f nW/cm^2\n", result.raw_UVC, result.UVC_nW);
+    
+    return result;
+}
+
+// New function to handle temperature measurement and calculation
+static int16_t ReadAndCalculateTemperature(void) {
+    uint16_t raw_temp = AS7331_read_measurement(1);
+    printf("Raw TEMP Register: 0x%04X (%d)\n", raw_temp, raw_temp);
+
+    // Extract only 12-bit value (remove unwanted bits)
+    raw_temp &= 0x0FFF;
+
+    // Sign extend if negative (12-bit to 16-bit signed integer)
+    if (raw_temp & 0x0800) {  
+        raw_temp |= 0xF000;  // Convert 12-bit signed to 16-bit signed
+    }
+
+    // Apply correct formula (converted to fixed-point)
+    // Return temperature in deci-degrees Celsius (0.1°C resolution)
+    int16_t temp_scaled = ((int32_t)raw_temp * 13) / 256 - 669; // (raw_temp * 0.05 - 66.9) * 10
+    printf("TEMP: %d.%d degC (Raw: 0x%04X, Dec: %d)\n", 
+           temp_scaled/10, abs(temp_scaled%10), raw_temp, raw_temp);
+
+    return temp_scaled;
 }
